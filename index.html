@@ -17,14 +17,7 @@ window.BROWSE_CONFIG = {
 
 // If this page was opened through the Tabspace relay (as a blob: page), it
 // can't run a service worker. Hop to this page's real address instead.
-(function () {
-    var ref = document.getElementById('self-ref').getAttribute('href') || '';
-    var m = ref.match(/\/api\/relay\?url=([^&]+)/);
-    if (m || location.protocol === 'blob:') {
-        window.__hop = true;
-        if (m) location.replace(decodeURIComponent(m[1]));
-    }
-})();
+
 </script>
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
