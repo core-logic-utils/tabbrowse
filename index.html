@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tabspace Browse</title>
+<link rel="icon" href="https://core-logic-utils.github.io/assets/tabspacelogo.png">
+<link id="self-ref" rel="alternate" href="./">
+<script>
+// ====================================================================
+//  CONFIG: paste your Render backend address here (keep the /wisp/ part).
+// ====================================================================
+window.BROWSE_CONFIG = {
+    WISP_URL: "wss://YOUR-BACKEND.onrender.com/wisp/",
+    SEARCH_URL: "https://duckduckgo.com/?q=%s"
+};
+
+// If this page was opened through the Tabspace relay (as a blob: page), it
+// can't run a service worker. Hop to this page's real address instead.
+(function () {
+    var ref = document.getElementById('self-ref').getAttribute('href') || '';
+    var m = ref.match(/\/api\/relay\?url=([^&]+)/);
+    if (m || location.protocol === 'blob:') {
+        window.__hop = true;
+        if (m) location.replace(decodeURIComponent(m[1]));
+    }
+})();
+</script>
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    :root {
+        --bg: #0b0506; --panel: #1a0d0f; --panel-2: #241216; --border: #3a1a1f;
+        --accent: #ef4444; --accent-dark: #b91c1c; --accent-light: #fca5a5;
+        --accent-glow: rgba(239, 68, 68, 0.35); --muted: #8b6f73;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+        margin: 0; background: var(--bg); color: white;
+        font-family: 'Inter', system-ui, sans-serif;
+        display: flex; flex-direction: column; overflow: hidden;
+    }
+    body::before {
+        content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+        background: radial-gradient(60% 50% at 50% 40%, rgba(239, 68, 68, .12), transparent 70%);
+    }
+
+    /* top bar */
+    #bar {
+        position: relative; z-index: 2; display: flex; align-items: center; gap: 8px;
+        padding: 10px 12px; background: rgba(26, 13, 15, .85); backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--border);
+    }
+    .btn {
+        flex: none; width: 38px; height: 38px; display: grid; place-items: center;
+        border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2);
+        color: #e4d4d6; cursor: pointer; transition: border-color .2s, background .2s, color .2s;
+    }
+    .btn:hover:not(:disabled) { border-color: var(--accent); color: white; background: rgba(60, 20, 26, .9); }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .btn:focus-visible, #addr:focus-visible, #home-search:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-glow); }
+    .btn svg { width: 17px; height: 17px; }
+    #addr-form { flex: 1; min-width: 0; position: relative; }
+    #addr, #home-search {
+        width: 100%; font: inherit; color: white; outline: none;
+        background: rgba(26, 13, 15, .8); border: 1px solid var(--border); border-radius: 999px;
+        transition: border-color .2s, box-shadow .2s;
+    }
+    #addr { font-size: .9rem; padding: 10px 16px 10px 40px; }
+    #addr:focus, #home-search:focus { border-color: var(--accent); }
+    #addr::placeholder, #home-search::placeholder { color: var(--muted); }
+    .search-icon { position: absolute; left: 15px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: #a1a1aa; pointer-events: none; }
+    #status { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #71717a; margin: 0 4px; }
+    #status.ok { background: #22c55e; } #status.wait { background: #f59e0b; } #status.bad { background: var(--accent); }
+
+    /* home */
+    #home {
+        position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; text-align: center; padding: 24px;
+    }
+    #home img { width: 110px; height: 110px; object-fit: contain; filter: drop-shadow(0 0 28px var(--accent-glow)); animation: float 5s ease-in-out infinite; }
+    #home h1 {
+        margin: 16px 0 22px; font-size: 3.2rem; font-weight: 700; letter-spacing: -0.02em;
+        background: linear-gradient(180deg, #fff 30%, var(--accent-light) 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    #home-form { position: relative; width: min(560px, 100%); }
+    #home-search { font-size: 1rem; padding: 14px 20px 14px 46px; }
+    #home-form .search-icon { left: 18px; }
+    #msg { min-height: 1.4em; margin: 16px 0 0; max-width: 560px; font-size: .88rem; color: #d4c4c6; line-height: 1.5; }
+    #msg.bad { color: var(--accent-light); }
+
+    /* proxied page */
+    #view { position: relative; z-index: 1; flex: 1; display: none; background: white; }
+    #view iframe { width: 100%; height: 100%; border: 0; display: block; }
+    body.browsing #home { display: none; }
+    body.browsing #view { display: block; }
+
+    @media (max-width: 520px) { #bar { gap: 6px; padding: 8px; } .btn { width: 34px; height: 34px; } #fwd { display: none; } #home h1 { font-size: 2.4rem; } }
+</style>
+</head>
+<body>
+<div id="bar">
+    <button class="btn" id="back" title="Back" aria-label="Back" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <button class="btn" id="fwd" title="Forward" aria-label="Forward" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+    <button class="btn" id="reload" title="Reload" aria-label="Reload" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+    <button class="btn" id="home-btn" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg></button>
+    <form id="addr-form" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="addr" type="text" spellcheck="false" placeholder="Search or enter a website" aria-label="Address">
+    </form>
+    <span id="status" title="Connecting…" role="status" aria-label="Connecting"></span>
+</div>
+
+<main id="home">
+    <img src="https://core-logic-utils.github.io/assets/tabspacelogo.png" alt="Tabspace logo">
+    <h1>Browse</h1>
+    <form id="home-form" autocomplete="off">
+        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="home-search" type="text" spellcheck="false" placeholder="Search or enter a website" aria-label="Search or enter a website" autofocus>
+    </form>
+    <p id="msg" role="alert"></p>
+</main>
+<div id="view"></div>
+
+<script>
+(function () {
+    'use strict';
+    if (window.__hop) {
+        document.getElementById('msg').textContent = 'Opening the browser at its real address…';
+        return;
+    }
+    var CFG = window.BROWSE_CONFIG;
+    var BASE = new URL('./', location.href).pathname;          // works in a GitHub Pages sub-folder
+    var $ = function (id) { return document.getElementById(id); };
+    var addr = $('addr'), homeSearch = $('home-search'), msg = $('msg'), status = $('status');
+    var frame = null, ready = null, pending = null;
+
+    function say(text, bad) { msg.textContent = text; msg.className = bad ? 'bad' : ''; }
+    function setStatus(kind, label) { status.className = kind; status.title = label; status.setAttribute('aria-label', label); }
+
+    function toUrl(input) {
+        input = input.trim();
+        if (!input) return null;
+        try { var u = new URL(input); if (u.protocol === 'http:' || u.protocol === 'https:') return u.href; } catch (e) { /* not a full URL */ }
+        if (!/\s/.test(input)) {
+            try { var h = new URL('https://' + input); if (h.hostname.indexOf('.') > 0) return h.href; } catch (e) { /* not a host */ }
+        }
+        return CFG.SEARCH_URL.replace('%s', encodeURIComponent(input));
+    }
+
+    function loadScript(path) {
+        return new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.onload = resolve;
+            s.onerror = function () { reject(new Error('Could not load ' + path)); };
+            s.src = BASE + path;
+            document.head.appendChild(s);
+        });
+    }
+
+    // Quick reachability check (Render's free tier can take ~1 minute to wake up).
+    function checkBackend() {
+        setStatus('wait', 'Connecting to the browsing server…');
+        var slow = setTimeout(function () { say('Waking up the browsing server… this can take up to a minute.'); }, 4000);
+        try {
+            var ws = new WebSocket(CFG.WISP_URL);
+            var t = setTimeout(function () { ws.close(); }, 70000);
+            ws.onopen = function () { clearTimeout(t); clearTimeout(slow); setStatus('ok', 'Connected'); if (msg.className !== 'bad') say(''); ws.close(); };
+            ws.onerror = function () { clearTimeout(t); clearTimeout(slow); setStatus('bad', 'Can’t reach the browsing server'); say('Can’t reach the browsing server. Check WISP_URL and that the backend allows this site (ALLOWED_ORIGINS).', true); };
+        } catch (e) { clearTimeout(slow); setStatus('bad', 'Invalid WISP_URL'); say('WISP_URL in this page is not a valid wss:// address.', true); }
+    }
+
+    async function init() {
+        if (!window.isSecureContext || !('serviceWorker' in navigator)) throw new Error('This browser needs a secure (https) page with service workers enabled.');
+        if (/YOUR-BACKEND/.test(CFG.WISP_URL)) throw new Error('Set WISP_URL at the top of index.html to your Render backend.');
+        var reg = await navigator.serviceWorker.register(BASE + 'sw.js', { scope: BASE, updateViaCache: 'none' });
+        await navigator.serviceWorker.ready;
+        if (!navigator.serviceWorker.controller) {
+            await new Promise(function (r) { navigator.serviceWorker.addEventListener('controllerchange', r, { once: true }); });
+        }
+        var sw = navigator.serviceWorker.controller || reg.active;
+        await loadScript('lib/scramjet.js');
+        await loadScript('lib/controller.api.js');
+        await loadScript('lib/scramjet-utils.js');
+        var Libcurl = (await import(BASE + 'lib/libcurl.mjs')).default;
+        var api = window.$scramjetController, utils = window.$scramjetUtils;
+        var controller = new api.Controller({
+            serviceworker: sw,
+            transport: new Libcurl({ wisp: CFG.WISP_URL }),
+            config: {
+                prefix: BASE + '~/sj/',
+                scramjetPath: BASE + 'lib/scramjet.js',
+                wasmPath: BASE + 'lib/scramjet.wasm',
+                injectPath: BASE + 'lib/controller.inject.js'
+            }
+        });
+        await controller.wait();
+        // Browsers stop idle service workers after ~30s, which makes Scramjet lose its routes.
+        setInterval(function () { if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage('keepalive'); }, 15000);
+        var iframe = document.createElement('iframe');
+        iframe.title = 'Proxied page';
+        $('view').appendChild(iframe);
+        frame = controller.createFrame(iframe, {
+            plugins: [new utils.UrlWatcherPlugin(function (url) { if (document.activeElement !== addr) addr.value = String(url); })]
+        });
+        ['back', 'fwd', 'reload'].forEach(function (id) { $(id).disabled = false; });
+        checkBackend();
+    }
+
+    function go(input) {
+        var url = toUrl(input);
+        if (!url) return;
+        addr.value = url;
+        if (!frame) { pending = url; return; }
+        document.body.classList.add('browsing');
+        frame.go(url);
+        addr.blur();
+    }
+
+    $('home-form').addEventListener('submit', function (e) { e.preventDefault(); go(homeSearch.value); });
+    $('addr-form').addEventListener('submit', function (e) { e.preventDefault(); go(addr.value); });
+    $('back').addEventListener('click', function () { if (frame) frame.back(); });
+    $('fwd').addEventListener('click', function () { if (frame) frame.forward(); });
+    $('reload').addEventListener('click', function () { if (frame) frame.reload(); });
+    $('home-btn').addEventListener('click', function () {
+        document.body.classList.remove('browsing');
+        addr.value = ''; homeSearch.value = '';
+        homeSearch.focus();
+    });
+
+    ready = init().then(function () {
+        if (pending) { var p = pending; pending = null; go(p); }
+    }).catch(function (err) {
+        console.error(err);
+        setStatus('bad', 'Not available');
+        say(err.message || String(err), true);
+    });
+})();
+</script>
+</body>
+</html>
